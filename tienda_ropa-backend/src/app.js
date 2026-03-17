@@ -21,7 +21,7 @@ app.use('/api/productos',  require('./routes/productos.routes'));
 app.use('/api/categorias', require('./routes/categorias.routes'));
 app.use('/api/carrito',    require('./routes/carrito.routes'));
 app.use('/api/pedidos',    require('./routes/pedidos.routes'));
-// app.use('/api/admin',      require('./routes/admin.routes'));
+app.use('/api/admin',      require('./routes/admin.routes'));
 
 // Ruta no encontrada
 app.use((req, res) => {
