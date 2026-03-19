@@ -8,9 +8,17 @@ const upload     = require('../middlewares/upload');
 router.get('/',    ctrl.getProductos);
 router.get('/:id', ctrl.getProducto);
 
-// Solo admin
-router.post('/',    auth, isAdmin, upload.single('imagen'), ctrl.createProducto);
-router.put('/:id',  auth, isAdmin, ctrl.updateProducto);
+// Admin rutas especiales primero
+router.post('/:id/imagenes', auth, isAdmin, upload.array('imagenes', 3), ctrl.uploadImagenesProducto);
+router.put('/:id/imagen-principal', auth, isAdmin, upload.single('imagen'), ctrl.updateImagenPrincipal);
+router.delete('/imagenes/:imagenId', auth, isAdmin, ctrl.deleteImagen);
+
+// Luego rutas con :id
+router.get('/:id', ctrl.getProducto);
+
+// CRUD principal
+router.post('/', auth, isAdmin, upload.single('imagen'), ctrl.createProducto);
+router.put('/:id', auth, isAdmin, upload.single('imagen'), ctrl.updateProducto);
 router.delete('/:id', auth, isAdmin, ctrl.deleteProducto);
 
 module.exports = router;

@@ -89,19 +89,19 @@ const createProducto = async (req, res) => {
     const producto = result.rows[0];
 
     // Si viene imagen, subirla a Cloudinary
-    if (req.file) {
-      const uploadResult = await cloudinary.uploader.upload(req.file.path, {
-        folder: 'tienda_ropa/productos'
-      });
+if (req.file) {
+  await pool.query(
+    `INSERT INTO producto_imagenes (producto_id, url, public_id, es_principal)
+     VALUES ($1, $2, $3, true)`,
+    [
+      producto.id,
+      req.file.path,       // URL ya generada por Cloudinary
+      req.file.filename    // public_id
+    ]
+  );
 
-      await pool.query(
-        `INSERT INTO producto_imagenes (producto_id, url, public_id, es_principal)
-         VALUES ($1, $2, $3, true)`,
-        [producto.id, uploadResult.secure_url, uploadResult.public_id]
-      );
-
-      producto.imagen_principal = uploadResult.secure_url;
-    }
+  producto.imagen_principal = req.file.path;
+}
 
     res.status(201).json(producto);
   } catch (err) {
@@ -118,14 +118,14 @@ const updateProducto = async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE productos
-       SET nombre = COALESCE($1, nombre),
-           descripcion = COALESCE($2, descripcion),
-           precio = COALESCE($3, precio),
+       SET nombre        = COALESCE($1, nombre),
+           descripcion   = COALESCE($2, descripcion),
+           precio        = COALESCE($3, precio),
            precio_oferta = $4,
-           categoria_id = COALESCE($5, categoria_id),
-           destacado = COALESCE($6, destacado),
-           activo = COALESCE($7, activo),
-           updated_at = NOW()
+           categoria_id  = COALESCE($5, categoria_id),
+           destacado     = COALESCE($6, destacado),
+           activo        = COALESCE($7, activo),
+           updated_at    = NOW()
        WHERE id = $8
        RETURNING *`,
       [nombre, descripcion, precio, precio_oferta || null, categoria_id, destacado, activo, id]
@@ -134,13 +134,68 @@ const updateProducto = async (req, res) => {
     if (result.rows.length === 0)
       return res.status(404).json({ error: 'Producto no encontrado' });
 
-    res.json(result.rows[0]);
+    const producto = result.rows[0];
+
+    // 👇 NUEVO: si viene imagen, reemplazar la imagen principal
+    if (req.file) {
+      // Eliminar imagen principal anterior de Cloudinary
+      const anterior = await pool.query(
+        'SELECT public_id FROM producto_imagenes WHERE producto_id = $1 AND es_principal = true',
+        [id]
+      );
+      if (anterior.rows.length > 0 && anterior.rows[0].public_id) {
+        await cloudinary.uploader.destroy(anterior.rows[0].public_id);
+      }
+
+      // Quitar flag principal de todas las imágenes del producto
+      await pool.query(
+        'UPDATE producto_imagenes SET es_principal = false WHERE producto_id = $1',
+        [id]
+      );
+
+      // Insertar nueva imagen principal
+      const imgResult = await pool.query(
+        `INSERT INTO producto_imagenes (producto_id, url, public_id, es_principal)
+         VALUES ($1, $2, $3, true)
+         RETURNING url`,
+        [id, req.file.path, req.file.filename]
+      );
+
+      producto.imagen_principal = imgResult.rows[0].url;
+    }
+
+    res.json(producto);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al actualizar producto' });
   }
 };
+const uploadImagenesProducto = async (req, res) => {
+  const { id } = req.params;
 
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No se enviaron imágenes' });
+    }
+
+    for (const file of req.files) {
+      await pool.query(
+        `INSERT INTO producto_imagenes (producto_id, url, public_id, es_principal)
+         VALUES ($1, $2, $3, false)`,
+        [
+          id,
+          file.path,
+          file.filename
+        ]
+      );
+    }
+
+    res.json({ message: 'Imágenes subidas correctamente' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al subir imágenes' });
+  }
+};
 // ELIMINAR PRODUCTO (solo admin)
 const deleteProducto = async (req, res) => {
   const { id } = req.params;
@@ -169,5 +224,65 @@ const deleteProducto = async (req, res) => {
     res.status(500).json({ error: 'Error al eliminar producto' });
   }
 };
+const updateImagenPrincipal = async (req, res) => {
+  const { id } = req.params;
 
-module.exports = { getProductos, getProducto, createProducto, updateProducto, deleteProducto };
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No se envió imagen' });
+    }
+
+    // quitar la anterior principal
+    await pool.query(
+      `UPDATE producto_imagenes
+       SET es_principal = false
+       WHERE producto_id = $1`,
+      [id]
+    );
+
+    // insertar nueva principal
+    const result = await pool.query(
+      `INSERT INTO producto_imagenes (producto_id, url, public_id, es_principal)
+       VALUES ($1, $2, $3, true)
+       RETURNING *`,
+      [id, req.file.path, req.file.filename]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al actualizar imagen principal' });
+  }
+};
+const deleteImagen = async (req, res) => {
+  const { imagenId } = req.params;
+
+  try {
+    const result = await pool.query(
+      'SELECT public_id FROM producto_imagenes WHERE id = $1',
+      [imagenId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Imagen no encontrada' });
+    }
+
+    const public_id = result.rows[0].public_id;
+
+    if (public_id) {
+      await cloudinary.uploader.destroy(public_id);
+    }
+
+    await pool.query(
+      'DELETE FROM producto_imagenes WHERE id = $1',
+      [imagenId]
+    );
+
+    res.json({ message: 'Imagen eliminada correctamente' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al eliminar imagen' });
+  }
+};
+
+module.exports = { getProductos, getProducto, createProducto, updateProducto, deleteProducto, uploadImagenesProducto, updateImagenPrincipal, deleteImagen};
