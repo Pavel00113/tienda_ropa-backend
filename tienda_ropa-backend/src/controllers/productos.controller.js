@@ -73,35 +73,29 @@ const getProducto = async (req, res) => {
 
 // CREAR PRODUCTO (solo admin)
 const createProducto = async (req, res) => {
-  const { nombre, descripcion, precio, precio_oferta, categoria_id, destacado } = req.body;
+  const { nombre, descripcion, precio, precio_oferta, categoria_id, destacado, maneja_tallas } = req.body;
 
   if (!nombre || !precio)
     return res.status(400).json({ error: 'Nombre y precio son obligatorios' });
 
   try {
     const result = await pool.query(
-      `INSERT INTO productos (nombre, descripcion, precio, precio_oferta, categoria_id, destacado)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO productos (nombre, descripcion, precio, precio_oferta, categoria_id, destacado, maneja_tallas)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [nombre, descripcion, precio, precio_oferta || null, categoria_id || null, destacado || false]
+      [nombre, descripcion, precio, precio_oferta || null, categoria_id || null, destacado || false, maneja_tallas || false]
     );
 
     const producto = result.rows[0];
 
-    // Si viene imagen, subirla a Cloudinary
-if (req.file) {
-  await pool.query(
-    `INSERT INTO producto_imagenes (producto_id, url, public_id, es_principal)
-     VALUES ($1, $2, $3, true)`,
-    [
-      producto.id,
-      req.file.path,       // URL ya generada por Cloudinary
-      req.file.filename    // public_id
-    ]
-  );
-
-  producto.imagen_principal = req.file.path;
-}
+    if (req.file) {
+      await pool.query(
+        `INSERT INTO producto_imagenes (producto_id, url, public_id, es_principal)
+         VALUES ($1, $2, $3, true)`,
+        [producto.id, req.file.path, req.file.filename]
+      );
+      producto.imagen_principal = req.file.path;
+    }
 
     res.status(201).json(producto);
   } catch (err) {
@@ -113,7 +107,7 @@ if (req.file) {
 // ACTUALIZAR PRODUCTO (solo admin)
 const updateProducto = async (req, res) => {
   const { id } = req.params;
-  const { nombre, descripcion, precio, precio_oferta, categoria_id, destacado, activo } = req.body;
+  const { nombre, descripcion, precio, precio_oferta, categoria_id, destacado, activo, maneja_tallas } = req.body;
 
   try {
     const result = await pool.query(
@@ -125,10 +119,11 @@ const updateProducto = async (req, res) => {
            categoria_id  = COALESCE($5, categoria_id),
            destacado     = COALESCE($6, destacado),
            activo        = COALESCE($7, activo),
+           maneja_tallas = COALESCE($8, maneja_tallas),
            updated_at    = NOW()
-       WHERE id = $8
+       WHERE id = $9
        RETURNING *`,
-      [nombre, descripcion, precio, precio_oferta || null, categoria_id, destacado, activo, id]
+      [nombre, descripcion, precio, precio_oferta || null, categoria_id, destacado, activo, maneja_tallas, id]
     );
 
     if (result.rows.length === 0)
@@ -136,9 +131,7 @@ const updateProducto = async (req, res) => {
 
     const producto = result.rows[0];
 
-    // 👇 NUEVO: si viene imagen, reemplazar la imagen principal
     if (req.file) {
-      // Eliminar imagen principal anterior de Cloudinary
       const anterior = await pool.query(
         'SELECT public_id FROM producto_imagenes WHERE producto_id = $1 AND es_principal = true',
         [id]
@@ -146,21 +139,15 @@ const updateProducto = async (req, res) => {
       if (anterior.rows.length > 0 && anterior.rows[0].public_id) {
         await cloudinary.uploader.destroy(anterior.rows[0].public_id);
       }
-
-      // Quitar flag principal de todas las imágenes del producto
       await pool.query(
         'UPDATE producto_imagenes SET es_principal = false WHERE producto_id = $1',
         [id]
       );
-
-      // Insertar nueva imagen principal
       const imgResult = await pool.query(
         `INSERT INTO producto_imagenes (producto_id, url, public_id, es_principal)
-         VALUES ($1, $2, $3, true)
-         RETURNING url`,
+         VALUES ($1, $2, $3, true) RETURNING url`,
         [id, req.file.path, req.file.filename]
       );
-
       producto.imagen_principal = imgResult.rows[0].url;
     }
 
@@ -170,6 +157,7 @@ const updateProducto = async (req, res) => {
     res.status(500).json({ error: 'Error al actualizar producto' });
   }
 };
+
 const uploadImagenesProducto = async (req, res) => {
   const { id } = req.params;
 
