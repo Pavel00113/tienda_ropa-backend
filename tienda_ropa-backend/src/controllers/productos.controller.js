@@ -272,5 +272,30 @@ const deleteImagen = async (req, res) => {
     res.status(500).json({ error: 'Error al eliminar imagen' });
   }
 };
+// UPSERT INVENTARIO
+const upsertInventario = async (req, res) => {
+  const { id } = req.params;
+  const { items } = req.body; // [{ talla, stock }]
 
-module.exports = { getProductos, getProducto, createProducto, updateProducto, deleteProducto, uploadImagenesProducto, updateImagenPrincipal, deleteImagen};
+  try {
+    // Elimina el inventario anterior del producto
+    await pool.query('DELETE FROM inventario WHERE producto_id = $1', [id]);
+
+    // Inserta los nuevos items
+    for (const item of items) {
+      if (item.stock > 0) {
+        await pool.query(
+          `INSERT INTO inventario (producto_id, talla, stock)
+           VALUES ($1, $2, $3)`,
+          [id, item.talla, item.stock]
+        );
+      }
+    }
+
+    res.json({ message: 'Inventario actualizado' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al actualizar inventario' });
+  }
+};
+module.exports = { getProductos, getProducto, createProducto, updateProducto, deleteProducto, uploadImagenesProducto, updateImagenPrincipal, deleteImagen, upsertInventario };

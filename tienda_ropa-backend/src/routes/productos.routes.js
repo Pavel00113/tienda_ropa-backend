@@ -15,6 +15,7 @@ router.delete('/imagenes/:imagenId', auth, isAdmin, ctrl.deleteImagen);
 
 // Luego rutas con :id
 router.get('/:id', ctrl.getProducto);
+router.put('/:id/inventario', auth, isAdmin, ctrl.upsertInventario);
 
 // CRUD principal
 router.post('/', auth, isAdmin, upload.single('imagen'), ctrl.createProducto);
